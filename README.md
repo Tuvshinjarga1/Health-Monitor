@@ -1,36 +1,103 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Google Fit Мониторинг Систем
 
-## Getting Started
+Firebase ба Google Fit API ашиглан 50 хүртэлх хэрэглэгчийн эрүүл мэндийн өгөгдлийг мониторинг хийх аппликейшн.
 
-First, run the development server:
+## Функционал тайлбар
+
+- **Firebase Authentication**: Хэрэглэгчдийг Email/Password эсвэл Google OAuth2 ашиглан бүртгэнэ
+- **Google Fit холболт**: OAuth2 ашиглан хэрэглэгчийн Google Fit өгөгдөлтэй холбогдоно
+- **Firestore Database**: Хэрэглэгчийн refresh token болон өгөгдлийг хадгална
+- **Cloud Functions**:
+  - /connectFit - Google Fit-тай холбох OAuth URL үүсгэх
+  - /oauth2callback - Google Fit зөвшөөрлийн дараа токеныг хадгалах
+  - /updateFitData - 15 минут тутамд хэрэглэгчдийн Google Fit өгөгдлийг шинэчлэх
+- **Dashboard**: Хэрэглэгчдийн өгөгдлийг харуулах
+
+## Техникийн архитектур
+
+- Frontend: Next.js + React + Tailwind CSS
+- Backend: Firebase Cloud Functions
+- Өгөгдлийн сан: Cloud Firestore
+- Бусад: Cloud Scheduler, Pub/Sub
+
+## Суулгах
+
+1. Node.js болон npm суулгасан байх шаардлагатай
+2. Git repo-г clone хийх:
+
+```bash
+git clone https://github.com/username/tsag.git
+cd tsag
+```
+
+3. Хамаарлууд суулгах:
+
+```bash
+npm install
+```
+
+4. Firebase тохиргоо:
+
+- Firebase Project үүсгэх (https://console.firebase.google.com/)
+- Firestore, Authentication (Google provider), Functions сервисүүдийг идэвхжүүлэх
+- Firebase CLI суулгах: `npm install -g firebase-tools`
+- Firebase-т нэвтрэх: `firebase login`
+
+5. Google Cloud Console дээр Google Fitness API идэвхжүүлэх
+
+6. `.env` файлд тохиргоонуудыг оруулах:
+
+```
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_CLIENT_SECRET=your-client-secret
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-secret-key
+
+# Firebase тохиргоо
+NEXT_PUBLIC_FIREBASE_API_KEY=your-api-key
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your-sender-id
+NEXT_PUBLIC_FIREBASE_APP_ID=your-app-id
+```
+
+7. Firebase Function суулгах:
+
+```bash
+cd functions
+npm install
+cd ..
+```
+
+8. Firebase дүрмүүд болон индексүүдийг deploy хийх:
+
+```bash
+firebase deploy --only firestore:rules,firestore:indexes
+```
+
+9. Хөгжүүлэлтийн серверийг ажиллуулах:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+10. Firebase функцуудыг deploy хийх:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+firebase deploy --only functions
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Ажиллуулах
 
-## Learn More
+Дараах URL-д хандана: http://localhost:3000
 
-To learn more about Next.js, take a look at the following resources:
+## Dashboard харах
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Нэвтэрсний дараа дараах линк рүү ороход хянах самбар харагдана:
+http://localhost:3000/dashboard
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Хэрэглэгчдэд холболтын линк өгөх
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Хэрэглэгчдэд дараах линкийг өгөхөд тэд өөрийн Google Fit өгөгдлийг танай системтэй холбох боломжтой:
+http://localhost:3000/connect-fit
