@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { getSupervisorOfficers } from "../../../lib/firebase";
 import { UserTokenInfo } from "../../../lib/userStorage";
@@ -14,19 +14,7 @@ export default function Dashboard() {
   const [selectedOfficer, setSelectedOfficer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (status === "loading") return;
-
-    if (!session) {
-      // Хэрэглэгч нэвтрээгүй бол нэвтрэх хуудас руу чиглүүлэх
-      window.location.href = "/auth/signin";
-      return;
-    }
-
-    fetchOfficers();
-  }, [session, status]);
-
-  const fetchOfficers = async () => {
+  const fetchOfficers = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -47,7 +35,26 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [
+    session,
+    selectedOfficer,
+    setOfficers,
+    setSelectedOfficer,
+    setLoading,
+    setError,
+  ]);
+
+  useEffect(() => {
+    if (status === "loading") return;
+
+    if (!session) {
+      // Хэрэглэгч нэвтрээгүй бол нэвтрэх хуудас руу чиглүүлэх
+      window.location.href = "/auth/signin";
+      return;
+    }
+
+    fetchOfficers();
+  }, [session, status, fetchOfficers]);
 
   const handleRefresh = () => {
     fetchOfficers();

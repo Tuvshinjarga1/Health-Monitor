@@ -1,33 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AuthButton from "../../components/AuthButton";
-import { syncUserWithFirebase } from "../../lib/auth";
 
 export default function HomePage() {
   const { data: session } = useSession();
   const router = useRouter();
-  const [syncing, setSyncing] = useState(false);
-
-  // Firebase-тэй нэг удаа синк хийх
-  useEffect(() => {
-    if (session && !syncing) {
-      setSyncing(true);
-      syncUserWithFirebase(session)
-        .then((userId) => {
-          console.log("Synced user with Firebase:", userId);
-        })
-        .catch((error) => {
-          console.error("Error syncing with Firebase:", error);
-        })
-        .finally(() => {
-          setSyncing(false);
-        });
-    }
-  }, [session, syncing]);
 
   return (
     <main className="container mx-auto px-4 py-8">
@@ -54,7 +34,7 @@ export default function HomePage() {
                   </h2>
                   <ol className="list-decimal pl-5 space-y-2 text-gray-700">
                     <li>Google акаунтаараа нэвтэрнэ</li>
-                    <li>"Google Fit холбох" дарна</li>
+                    <li>&ldquo;Google Fit холбох&rdquo; дарна</li>
                     <li>Google Fit-ийн зөвшөөрөл өгнө</li>
                     <li>
                       Системд таны аппликейшнээс эрүүл мэндийн өгөгдөл харагдана

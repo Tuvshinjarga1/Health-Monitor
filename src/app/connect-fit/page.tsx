@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { savePoliceOfficerData } from "../../../lib/firebase";
@@ -13,16 +13,8 @@ export default function ConnectFit() {
   const searchParams = useSearchParams();
   const supervisorId = searchParams?.get("supervisor"); // Цагдаа ажилтны хянагч эмчийн ID (имэйл)
 
-  useEffect(() => {
-    if (status === "loading") return;
-
-    // Хэрэглэгч нэвтэрсэн ба Google Fit-д холбогдсон эсэхийг шалгах
-    if (session?.accessToken) {
-      connectToGoogleFit();
-    }
-  }, [session, status]);
-
-  const connectToGoogleFit = async () => {
+  // useCallback ашиглан функцыг мемоизаци хийн
+  const connectToGoogleFit = useCallback(async () => {
     if (
       !session?.accessToken ||
       !session?.refreshToken ||
@@ -58,7 +50,16 @@ export default function ConnectFit() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [session, supervisorId, setLoading, setError, setSuccess]);
+
+  useEffect(() => {
+    if (status === "loading") return;
+
+    // Хэрэглэгч нэвтэрсэн ба Google Fit-д холбогдсон эсэхийг шалгах
+    if (session?.accessToken) {
+      connectToGoogleFit();
+    }
+  }, [session, status, connectToGoogleFit]);
 
   const handleConnectClick = () => {
     if (session) {
