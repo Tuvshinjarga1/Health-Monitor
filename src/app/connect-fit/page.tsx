@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { savePoliceOfficerData } from "../../../lib/firebase";
 
-export default function ConnectFit() {
+// Главный контент компонента
+function ConnectFitContent() {
   const { data: session, status } = useSession();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -212,5 +213,25 @@ export default function ConnectFit() {
         )}
       </div>
     </div>
+  );
+}
+
+// Үндсэн компонент Suspense-тэй
+export default function ConnectFit() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gray-100">
+          <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center">
+            <div className="flex justify-center mb-4">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+            <p className="text-gray-600">Уншиж байна...</p>
+          </div>
+        </div>
+      }
+    >
+      <ConnectFitContent />
+    </Suspense>
   );
 }
