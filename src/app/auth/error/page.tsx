@@ -1,87 +1,81 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Suspense } from "react";
 
-// Separate component for handling searchParams
-function ErrorContent() {
+// Content component that uses useSearchParams
+function AuthErrorContent() {
   const searchParams = useSearchParams();
-  const [error, setError] = useState<string | null>(null);
+  const error = searchParams?.get("error");
 
-  useEffect(() => {
-    const errorParam = searchParams?.get("error");
-    if (errorParam) {
-      switch (errorParam) {
-        case "OAuthSignin":
-          setError("OAuth-аар нэвтрэх үйлдэл алдаатай.");
-          break;
-        case "OAuthCallback":
-          setError("OAuth callback хүсэлт алдаатай.");
-          break;
-        case "OAuthCreateAccount":
-          setError("OAuth бүртгэл үүсгэхэд алдаа гарлаа.");
-          break;
-        case "EmailCreateAccount":
-          setError("И-мэйлээр бүртгэл үүсгэхэд алдаа гарлаа.");
-          break;
-        case "Callback":
-          setError("OAuth provider-ийн callback хүсэлт амжилтгүй.");
-          break;
-        case "OAuthAccountNotLinked":
-          setError("И-мэйл ашиглан аль хэдийн бүртгэлтэй байна.");
-          break;
-        case "AccessDenied":
-          setError("Хандах эрх хаагдсан.");
-          break;
-        case "Configuration":
-          setError("NextAuth тохиргоонд алдаа гарлаа.");
-          break;
-        default:
-          setError(`Тодорхойгүй алдаа: ${errorParam}`);
-          break;
-      }
-    } else {
-      setError("Нэвтрэхэд алдаа гарлаа.");
+  const getErrorMessage = (errorCode: string | null) => {
+    if (!errorCode) return "Нэвтрэх явцад тодорхойгүй алдаа гарлаа.";
+
+    switch (errorCode) {
+      case "Callback":
+        return "Нэвтрэх явцад Google-ээс буцаан хариу ирсэнгүй. OAuth callback алдаа.";
+      case "OAuthSignin":
+        return "Google OAuth эхлүүлэх үед алдаа гарлаа.";
+      case "OAuthCallback":
+        return "Google OAuth callback хүлээн авах үед алдаа гарлаа.";
+      case "OAuthCreateAccount":
+        return "Google дансаар нэвтрэхэд алдаа гарлаа.";
+      case "EmailCreateAccount":
+        return "Имэйл дансаар нэвтрэхэд алдаа гарлаа.";
+      case "Callback":
+        return "Нэвтрэх явцад алдаа гарлаа.";
+      case "OAuthAccountNotLinked":
+        return "Энэ имэйл өөр аргаар бүртгэгдсэн байна.";
+      case "EmailSignin":
+        return "Имэйл илгээхэд алдаа гарлаа.";
+      case "CredentialsSignin":
+        return "Нэвтрэх мэдээлэл буруу байна.";
+      case "SessionRequired":
+        return "Энэ хуудсыг үзэхийн тулд та эхлээд нэвтрэх хэрэгтэй.";
+      case "Default":
+      default:
+        return "Нэвтрэх явцад тодорхойгүй алдаа гарлаа.";
     }
-  }, [searchParams]);
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
-        <div className="text-center mb-8">
-          <div className="flex justify-center mb-4">
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4">
+      <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center">
+        <div className="mb-6">
+          <div className="h-16 w-16 bg-red-100 rounded-full flex items-center justify-center mx-auto">
             <svg
-              className="w-16 h-16 text-red-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+              className="h-10 w-10 text-red-600"
               xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeWidth="2"
-                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              ></path>
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">
-            Нэвтрэлтийн алдаа
-          </h1>
-          {error && <p className="text-red-600 mb-6">{error}</p>}
         </div>
 
-        <div className="space-y-4">
+        <h2 className="text-2xl font-bold text-gray-800 mb-4">Нэвтрэх алдаа</h2>
+
+        <p className="text-gray-600 mb-8">{getErrorMessage(error || null)}</p>
+
+        <div className="flex flex-col space-y-3">
           <Link
             href="/auth/signin"
-            className="block w-full text-center bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition duration-300"
+            className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg text-center"
           >
-            Дахин оролдох
+            Дахин нэвтрэх
           </Link>
+
           <Link
             href="/"
-            className="block w-full text-center bg-white border border-gray-300 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-50 transition duration-300"
+            className="inline-block text-blue-600 hover:text-blue-800 font-medium py-2 text-center"
           >
             Нүүр хуудас руу буцах
           </Link>
@@ -91,7 +85,7 @@ function ErrorContent() {
   );
 }
 
-// Main component with Suspense boundary
+// Wrap in Suspense for Next.js
 export default function AuthError() {
   return (
     <Suspense
@@ -106,7 +100,7 @@ export default function AuthError() {
         </div>
       }
     >
-      <ErrorContent />
+      <AuthErrorContent />
     </Suspense>
   );
 }

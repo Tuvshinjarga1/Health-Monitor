@@ -302,7 +302,7 @@ function ConnectFitContent() {
   );
 }
 
-// Үндсэн компонент Suspense-тэй
+// Wrap the component in Suspense for Next.js
 export default function ConnectFit() {
   return (
     <Suspense
