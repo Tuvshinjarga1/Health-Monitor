@@ -16,18 +16,44 @@ function ConnectFitContent() {
 
   // useCallback ашиглан функцыг мемоизаци хийн
   const connectToGoogleFit = useCallback(async () => {
+    console.log("🔄 Google Fit холболт эхлэж байна");
+    console.log("🔑 Session мэдээлэл:", {
+      hasAccessToken: !!session?.accessToken,
+      hasRefreshToken: !!session?.refreshToken,
+      hasUser: !!session?.user,
+      userEmail: session?.user?.email,
+      tokenExpiry: session?.tokenExpiry,
+    });
+
+    console.log("👀 supervisorId:", supervisorId);
+
     if (
       !session?.accessToken ||
       !session?.refreshToken ||
       !session?.user?.email
     ) {
-      setError("Google Fit-д холбогдоход шаардлагатай мэдээлэл дутуу байна");
+      console.error("❌ Session мэдээлэл дутуу байна:", {
+        hasAccessToken: !!session?.accessToken,
+        hasRefreshToken: !!session?.refreshToken,
+        hasEmail: !!session?.user?.email,
+      });
+      setError(
+        "Google Fit-д холбогдоход шаардлагатай мэдээлэл дутуу байна. Дахин нэвтрэх шаардлагатай байж болно."
+      );
       return;
     }
 
     try {
       setLoading(true);
       setError(null);
+
+      console.log("💾 Firebase руу хадгалах гэж байна:", {
+        email: session.user.email,
+        name: session.user.name,
+        tokenLength: session.accessToken?.length || 0,
+        refreshTokenLength: session.refreshToken?.length || 0,
+        supervisorId: supervisorId || "байхгүй",
+      });
 
       // Цагдаа ажилтны мэдээллийг Firestore-д хадгалах
       const result = await savePoliceOfficerData(
@@ -41,24 +67,60 @@ function ConnectFitContent() {
       );
 
       if (result) {
+        console.log("✅ Firebase-д амжилттай хадгалагдлаа");
         setSuccess(true);
       } else {
-        setError("Google Fit холбогдолт хадгалахад алдаа гарлаа");
+        console.error("❌ Firebase-д хадгалахад алдаа гарлаа");
+        setError(
+          "Google Fit холбогдолт хадгалахад алдаа гарлаа. Firebase холболтыг шалгана уу."
+        );
       }
     } catch (err) {
-      console.error("Error connecting to Google Fit:", err);
-      setError("Google Fit-д холбогдоход алдаа гарлаа");
+      console.error("❌ Google Fit холболтын алдаа:", err);
+      setError(
+        "Google Fit-д холбогдоход алдаа гарлаа" +
+          (err instanceof Error ? `: ${err.message}` : "")
+      );
     } finally {
       setLoading(false);
     }
   }, [session, supervisorId, setLoading, setError, setSuccess]);
+
+  const handleDebugClick = async () => {
+    console.log("🔍 Session дэлгэрэнгүй:", session);
+
+    // Check if Firebase is initialized correctly
+    try {
+      const result = await fetch("/api/check-firebase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: session?.user?.email,
+          test: true,
+        }),
+      });
+      const data = await result.json();
+      console.log("✅ Firebase шалгалтын үр дүн:", data);
+    } catch (err) {
+      console.error("❌ Firebase шалгалтын алдаа:", err);
+    }
+  };
 
   useEffect(() => {
     if (status === "loading") return;
 
     // Хэрэглэгч нэвтэрсэн ба Google Fit-д холбогдсон эсэхийг шалгах
     if (session?.accessToken) {
+      console.log(
+        "🔄 useEffect дотор session.accessToken олдлоо, connectToGoogleFit дуудах гэж байна"
+      );
       connectToGoogleFit();
+    } else {
+      console.log("⚠️ useEffect дотор session.accessToken олдсонгүй:", {
+        status,
+        hasSession: !!session,
+        hasAccessToken: !!session?.accessToken,
+      });
     }
   }, [session, status, connectToGoogleFit]);
 
@@ -189,6 +251,30 @@ function ConnectFitContent() {
               )}
               {loading ? "Холбогдож байна..." : "Google Fit-тэй холбогдох"}
             </button>
+
+            {/* Debug button - only show in development */}
+            {process.env.NODE_ENV !== "production" && (
+              <button
+                onClick={handleDebugClick}
+                className="mt-4 w-full bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-4 rounded-lg flex items-center justify-center text-sm"
+              >
+                <svg
+                  className="h-4 w-4 mr-2"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
+                </svg>
+                Диагностик (Debug)
+              </button>
+            )}
           </>
         )}
 

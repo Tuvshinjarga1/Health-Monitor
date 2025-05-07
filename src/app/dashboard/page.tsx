@@ -6,6 +6,7 @@ import { getSupervisorOfficers } from "../../../lib/firebase";
 import { UserTokenInfo } from "../../../lib/userStorage";
 import { formatDate } from "../../../lib/utils";
 import PatientDetails from "../../../components/PatientDetails";
+import { savePoliceOfficerData } from "../../../lib/firebase";
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
@@ -13,24 +14,114 @@ export default function Dashboard() {
   const [officers, setOfficers] = useState<UserTokenInfo[]>([]);
   const [selectedOfficer, setSelectedOfficer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [redirectingToConnect, setRedirectingToConnect] = useState(false);
 
   const fetchOfficers = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
+      console.log("🔍 Ажилтны мэдээлэл татаж байна, session:", {
+        hasSession: !!session,
+        hasEmail: !!session?.user?.email,
+        email: session?.user?.email,
+      });
+
       // Нэвтэрсэн хэрэглэгчийн имэйл хаягаар цагдаа нарын мэдээлэл татах
       if (session?.user?.email) {
+        console.log(
+          "📋 getSupervisorOfficers функцыг дуудаж байна:",
+          session.user.email
+        );
         const officerList = await getSupervisorOfficers(session.user.email);
-        setOfficers(officerList);
+        console.log("✅ Ажилтны жагсаалт авлаа:", officerList.length, "хүн");
 
-        // Автоматаар эхний цагдааг сонгох
-        if (officerList.length > 0 && !selectedOfficer) {
-          setSelectedOfficer(officerList[0].userId);
+        // If no officers found and user has tokens, maybe user hasn't connected to Google Fit yet
+        if (
+          officerList.length === 0 &&
+          session?.accessToken &&
+          session?.refreshToken
+        ) {
+          console.log(
+            "⚠️ Хэрэглэгч Firebase-д бүртгэлгүй байна, автоматаар Google Fit-тэй холбох гэж байна"
+          );
+          console.log(
+            "💾 Хэрэглэгч мэдээллийг Firebase-д хадгалах гэж байна:",
+            {
+              email: session.user.email,
+              name: session.user.name,
+            }
+          );
+
+          try {
+            // Try to save the user data to Firebase directly
+            const result = await savePoliceOfficerData(
+              session.user.email!,
+              session.user.name || "Тодорхойгүй",
+              session.user.email!,
+              session.accessToken,
+              session.refreshToken,
+              session.tokenExpiry || 0
+            );
+
+            if (result) {
+              console.log(
+                "✅ Firebase-д амжилттай хадгалагдлаа, дахин жагсаалт татаж байна"
+              );
+              // Try to fetch officers again
+              const updatedOfficerList = await getSupervisorOfficers(
+                session.user.email
+              );
+              setOfficers(updatedOfficerList);
+
+              if (updatedOfficerList.length === 0) {
+                console.log(
+                  "⚠️ Хэрэглэгчийг Firebase-д хадгалсан ч жагсаалт хоосон байна"
+                );
+                // Redirect to connect page after saving if still no officers
+                setRedirectingToConnect(true);
+                window.location.href = "/connect-fit";
+                return;
+              }
+
+              // Select first officer if available
+              if (updatedOfficerList.length > 0 && !selectedOfficer) {
+                setSelectedOfficer(updatedOfficerList[0].userId);
+              }
+            } else {
+              // If saving failed, redirect to connect page
+              console.log(
+                "❌ Firebase-д хадгалахад алдаа гарлаа, Google Fit холболт руу чиглүүлж байна"
+              );
+              setRedirectingToConnect(true);
+              window.location.href = "/connect-fit";
+              return;
+            }
+          } catch (err) {
+            console.error("❌ Firebase-д хадгалахад алдаа гарлаа:", err);
+            setRedirectingToConnect(true);
+            window.location.href = "/connect-fit";
+            return;
+          }
+        } else {
+          setOfficers(officerList);
+
+          // Автоматаар эхний цагдааг сонгох
+          if (officerList.length > 0 && !selectedOfficer) {
+            console.log(
+              "🔘 Эхний ажилтныг сонгож байна:",
+              officerList[0].userId
+            );
+            setSelectedOfficer(officerList[0].userId);
+          } else if (officerList.length === 0) {
+            console.log("❗ Ажилтны жагсаалт хоосон байна");
+          }
         }
+      } else {
+        console.log("❌ Хэрэглэгчийн email олдсонгүй");
       }
     } catch (err) {
-      console.error("Failed to fetch officers:", err);
+      console.error("❌ Ажилтны жагсаалт татахад алдаа гарлаа:", err);
       setError("Цагдаа нарын мэдээлэл авахад алдаа гарлаа");
     } finally {
       setLoading(false);
@@ -45,16 +136,19 @@ export default function Dashboard() {
   ]);
 
   useEffect(() => {
-    if (status === "loading") return;
+    if (status === "loading" || redirectingToConnect) return;
+
+    console.log("🔄 Dashboard эффект ажиллаж байна, status:", status);
 
     if (!session) {
       // Хэрэглэгч нэвтрээгүй бол нэвтрэх хуудас руу чиглүүлэх
+      console.log("⚠️ Хэрэглэгч нэвтрээгүй, чиглүүлж байна");
       window.location.href = "/auth/signin";
       return;
     }
 
     fetchOfficers();
-  }, [session, status, fetchOfficers]);
+  }, [session, status, fetchOfficers, redirectingToConnect]);
 
   const handleRefresh = () => {
     fetchOfficers();
@@ -94,7 +188,8 @@ export default function Dashboard() {
     <div className="container mx-auto px-4 py-8 text-black">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold text-white">
-          Цагдаа ажилтнуудын эрүүл мэндийн хяналт
+          {/* Цагдаа ажилтнуудын эрүүл мэндийн хяналт */}
+          Эрүүл мэндийн хяналт
         </h1>
         <button
           onClick={handleRefresh}
@@ -119,7 +214,8 @@ export default function Dashboard() {
         <div className="lg:col-span-1">
           <div className="bg-white rounded-lg shadow-md p-4 mb-4">
             <h2 className="text-xl font-semibold mb-4 text-black">
-              Хяналтад буй цагдаа нар ({officers.length})
+              {/* Хяналтад буй цагдаа нар ({officers.length}) */}
+              Хяналтад буй ({officers.length})
             </h2>
 
             {loading && officers.length === 0 ? (
@@ -128,7 +224,8 @@ export default function Dashboard() {
               </div>
             ) : officers.length === 0 ? (
               <div className="text-center py-4 text-gray-500">
-                Хяналтад буй цагдаа ажилтан байхгүй байна
+                Хяналтад буй ажилтан байхгүй байна
+                {/* Хяналтад буй цагдаа ажилтан байхгүй байна */}
               </div>
             ) : (
               <div className="space-y-2 max-h-[70vh] overflow-y-auto">
@@ -178,11 +275,11 @@ export default function Dashboard() {
 
           <div className="bg-white rounded-lg shadow-md p-4">
             <h2 className="text-xl font-semibold mb-2 text-black">
-              Хурдан холбоос
+              Нэмэх холбоос
             </h2>
             <p className="text-sm text-gray-600 mb-4">
-              Доорх холбоосыг цагдаа ажилтандаа илгээж Google Fit-тэй холбох
-              боломжтой
+              {/* Доорх холбоосыг цагдаа ажилтандаа илгээж Google Fit-тэй холбох */}
+              Доорх холбоосыг ажилтандаа илгээж health-тэй холбох боломжтой
             </p>
 
             <div className="border border-gray-200 rounded p-3 bg-gray-50 text-sm text-gray-700 break-all">
@@ -239,11 +336,13 @@ export default function Dashboard() {
                 />
               </svg>
               <h3 className="text-lg font-semibold text-gray-600 mb-2">
-                Цагдаа ажилтан сонгоно уу
+                ажилтан сонгоно уу
+                {/* Цагдаа ажилтан сонгоно уу */}
               </h3>
               <p className="text-gray-500">
-                Дэлгэрэнгүй мэдээллийг харахын тулд жагсаалтаас цагдаа ажилтныг
-                сонгоно уу
+                {/* Дэлгэрэнгүй мэдээллийг харахын тулд жагсаалтаас цагдаа ажилтныг */}
+                Дэлгэрэнгүй мэдээллийг харахын тулд жагсаалтаас ажилтныг сонгоно
+                уу
               </p>
             </div>
           )}

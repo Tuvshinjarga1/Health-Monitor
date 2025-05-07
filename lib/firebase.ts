@@ -1,5 +1,5 @@
 // lib/firebase.ts
-import { initializeApp, getApps } from "firebase/app";
+import { initializeApp, getApps, FirebaseApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import {
   getFirestore,
@@ -28,11 +28,36 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+console.log("🔥 Firebase тохиргоо шалгаж байна:", {
+  hasApiKey: !!firebaseConfig.apiKey,
+  hasAuthDomain: !!firebaseConfig.authDomain,
+  hasProjectId: !!firebaseConfig.projectId,
+  hasAppId: !!firebaseConfig.appId,
+});
+
+// Check if any Firebase config values are missing
+const missingConfigValues = Object.entries(firebaseConfig)
+  .filter(([_, value]) => !value)
+  .map(([key]) => key);
+
+if (missingConfigValues.length > 0) {
+  console.error("❌ Firebase тохиргооны дутуу утгууд:", missingConfigValues);
+}
+
 // Initialize Firebase
-const app =
-  getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-const auth = getAuth(app);
-const db = getFirestore(app);
+let app: FirebaseApp;
+let db: any;
+let auth: any;
+
+try {
+  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+  auth = getAuth(app);
+  db = getFirestore(app);
+  console.log("✅ Firebase амжилттай холбогдлоо");
+} catch (error) {
+  console.error("❌ Firebase initialization error:", error);
+  throw new Error("Firebase initialization failed");
+}
 
 // Цагдаа ажилтны мэдээллийг Firestore-д хадгалах
 export async function savePoliceOfficerData(
@@ -45,7 +70,44 @@ export async function savePoliceOfficerData(
   supervisorId?: string // Хянагч эмчийн ID
 ) {
   try {
-    const officerData: UserTokenInfo & { supervisorId?: string } = {
+    console.log("🔑 Хадгалж буй токен мэдээлэл:", {
+      officerId,
+      name,
+      email,
+      accessToken: accessToken
+        ? accessToken.substring(0, 10) + "..."
+        : "байхгүй",
+      refreshToken: refreshToken
+        ? refreshToken.substring(0, 10) + "..."
+        : "байхгүй",
+      tokenExpiry,
+      supervisorId,
+    });
+
+    // Validate required fields
+    if (!officerId) {
+      console.error("❌ OfficerId заавал шаардлагатай");
+      return false;
+    }
+
+    if (!accessToken) {
+      console.error("❌ AccessToken заавал шаардлагатай");
+      return false;
+    }
+
+    if (!refreshToken) {
+      console.error("❌ RefreshToken заавал шаардлагатай");
+      return false;
+    }
+
+    // Fix the path (collection name) if needed. Make sure "officers" collection exists
+    const collectionPath = "officers";
+    console.log(
+      `📁 Firestore "${collectionPath}" collection руу хадгалж байна, documentId: ${officerId}`
+    );
+
+    // Create the officer data object without supervisorId first
+    const officerData: UserTokenInfo & { supervisorId?: string | null } = {
       userId: officerId,
       name,
       email,
@@ -53,13 +115,48 @@ export async function savePoliceOfficerData(
       refreshToken,
       tokenExpiry,
       lastUpdated: serverTimestamp(), // Серверийн timestamp ашиглах
-      supervisorId,
     };
 
-    await setDoc(doc(db, "officers", officerId), officerData);
-    return true;
+    // Only add supervisorId if it has a valid string value (not undefined)
+    if (supervisorId) {
+      officerData.supervisorId = supervisorId;
+    } else {
+      // Firestore doesn't allow undefined values, but null is permitted
+      officerData.supervisorId = null;
+    }
+
+    console.log("📝 Хадгалах өгөгдөл:", {
+      ...officerData,
+      accessToken: accessToken
+        ? accessToken.substring(0, 10) + "..."
+        : "байхгүй",
+      refreshToken: refreshToken
+        ? refreshToken.substring(0, 10) + "..."
+        : "байхгүй",
+      lastUpdated: "serverTimestamp()",
+    });
+
+    // Try to set document data
+    await setDoc(doc(db, collectionPath, officerId), officerData);
+    console.log("✅ Firebase-д амжилттай хадгалагдлаа:", officerId);
+
+    // Verify data was actually saved
+    const savedDoc = await getDoc(doc(db, collectionPath, officerId));
+    if (savedDoc.exists()) {
+      console.log("✅ Хадгалсан мэдээлэл шалгалт амжилттай");
+      return true;
+    } else {
+      console.error("❌ Мэдээлэл хадгалагдсан ч дараа нь олдсонгүй");
+      return false;
+    }
   } catch (error) {
-    console.error("Error saving officer data to Firestore:", error);
+    console.error("❌ Firebase-д хадгалахад алдаа гарлаа:", error);
+    if (error instanceof Error) {
+      console.error("❌ Алдааны дэлгэрэнгүй:", error.message);
+      if (error.stack) {
+        console.error("Stack trace:", error.stack);
+      }
+    }
     return false;
   }
 }
@@ -89,6 +186,39 @@ export async function updatePoliceOfficerData(
 // Хянагч нэг эмчийн хяналтан дахь бүх цагдаа ажилтны жагсаалтыг авах
 export async function getSupervisorOfficers(supervisorId: string) {
   try {
+    console.log("🔍 Ажилтны жагсаалт хайж байна:", supervisorId);
+
+    // First, check if user has own data (finding by userId = email)
+    let ownData = null;
+    try {
+      const userDocRef = doc(db, "officers", supervisorId);
+      const userDocSnap = await getDoc(userDocRef);
+
+      if (userDocSnap.exists()) {
+        console.log("✅ Хэрэглэгчийн өөрийн мэдээлэл олдлоо:", supervisorId);
+        const data = userDocSnap.data();
+        // Convert Firestore Timestamp to JS Date
+        if (data.lastUpdated) {
+          data.lastUpdated =
+            data.lastUpdated instanceof Timestamp
+              ? data.lastUpdated.toDate()
+              : data.lastUpdated;
+        }
+        ownData = data as UserTokenInfo;
+      } else {
+        console.log("⚠️ Хэрэглэгчийн өөрийн мэдээлэл олдсонгүй:", supervisorId);
+      }
+    } catch (err) {
+      console.error(
+        "❌ Хэрэглэгчийн өөрийн мэдээлэл хайхад алдаа гарлаа:",
+        err
+      );
+    }
+
+    // Now find all officers supervised by this user
+    console.log(
+      "🔎 Firestore query үүсгэж байна - supervised хэрэглэгчид хайх"
+    );
     const officersRef = collection(db, "officers");
     const q = query(
       officersRef,
@@ -96,11 +226,26 @@ export async function getSupervisorOfficers(supervisorId: string) {
       orderBy("lastUpdated", "desc")
     );
 
+    console.log("🔎 Firestore query үүсгэв, хүсэлт илгээж байна");
     const querySnapshot = await getDocs(q);
+    console.log("✅ Firestore хариу авлаа, хэмжээ:", querySnapshot.size);
+
     const officers: UserTokenInfo[] = [];
 
+    // First add the user's own data if found
+    if (ownData) {
+      officers.push(ownData);
+    }
+
+    // Then add all supervised officers
     querySnapshot.forEach((doc) => {
+      // Skip if this is the user's own data (already added)
+      if (doc.id === supervisorId) {
+        return;
+      }
+
       const data = doc.data();
+      console.log("📄 Supervised хэрэглэгчийн мэдээлэл олдлоо:", doc.id);
 
       // Firestore Timestamp объектыг JavaScript Date болгох
       if (data.lastUpdated) {
@@ -114,9 +259,10 @@ export async function getSupervisorOfficers(supervisorId: string) {
       officers.push(data as UserTokenInfo);
     });
 
+    console.log("📋 Нийт олдсон ажилтны тоо:", officers.length);
     return officers;
   } catch (error) {
-    console.error("Error getting supervisor's officers:", error);
+    console.error("❌ Supervisor ажилтны жагсаалт авахад алдаа гарлаа:", error);
     return [];
   }
 }
@@ -124,6 +270,8 @@ export async function getSupervisorOfficers(supervisorId: string) {
 // Нэг цагдаа ажилтны мэдээллийг авах
 export async function getPoliceOfficerData(officerId: string) {
   try {
+    console.log("🔍 Ажилтны мэдээлэл хайж байна:", officerId);
+
     const docRef = doc(db, "officers", officerId);
     const docSnap = await getDoc(docRef);
 
@@ -139,12 +287,24 @@ export async function getPoliceOfficerData(officerId: string) {
             : data.lastUpdated;
       }
 
+      console.log("✅ Ажилтны мэдээлэл олдлоо:", {
+        userId: data.userId,
+        name: data.name,
+        email: data.email,
+        hasAccessToken: !!data.accessToken,
+        hasRefreshToken: !!data.refreshToken,
+        tokenExpiry: data.tokenExpiry,
+        lastUpdated: data.lastUpdated,
+        hasFitnessData: !!data.fitnessData,
+      });
+
       return data as UserTokenInfo;
     } else {
+      console.log("❌ Ажилтны мэдээлэл олдсонгүй:", officerId);
       return null;
     }
   } catch (error) {
-    console.error("Error getting officer data:", error);
+    console.error("❌ Ажилтны мэдээлэл авахад алдаа гарлаа:", error);
     return null;
   }
 }

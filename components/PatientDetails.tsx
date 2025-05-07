@@ -29,12 +29,24 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
           return;
         }
 
+        console.log("👤 Ажилтны мэдээлэл авлаа:", {
+          userId: data.userId,
+          name: data.name,
+          email: data.email,
+          hasAccessToken: !!data.accessToken,
+          hasRefreshToken: !!data.refreshToken,
+          tokenExpiry: data.tokenExpiry,
+          lastUpdated: data.lastUpdated,
+        });
+
         setPatient(data);
 
         // Ажилтны фитнесс өгөгдөл байгаа эсэхийг шалгах
         if (data.fitnessData) {
+          console.log("📊 Байгаа өгөгдлийг харуулж байна");
           setFitnessData(data.fitnessData);
         } else {
+          console.log("🔄 Шинэ өгөгдөл татаж байна");
           await fetchFitnessData(data);
         }
       } catch (err) {
@@ -58,24 +70,43 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
       const now = Math.floor(Date.now() / 1000);
       let accessToken = officerData.accessToken;
 
+      console.log("🔐 Токены хугацаа шалгаж байна:", {
+        now,
+        tokenExpiry: officerData.tokenExpiry,
+        isExpired: now > officerData.tokenExpiry,
+      });
+
       if (now > officerData.tokenExpiry) {
         // Токен шинэчлэх
+        console.log("🔄 Токен хугацаа дууссан, шинэчилж байна");
         const newTokens = await refreshAccessToken(officerData.refreshToken);
         accessToken = newTokens.accessToken;
 
+        console.log("✅ Шинэ токен авлаа:", {
+          accessToken: accessToken
+            ? accessToken.substring(0, 10) + "..."
+            : "байхгүй",
+          tokenExpiry: newTokens.tokenExpiry,
+        });
+
         // Шинэ токеныг хадгалах
         await updatePoliceOfficerData(officerData.userId, undefined);
+      } else {
+        console.log("✅ Токен хүчинтэй байна");
       }
 
       // Google Fit-ээс өгөгдөл авах
+      console.log("🔍 Google Fit-ээс өгөгдөл татаж байна");
       const fitData = await getGoogleFitData(accessToken);
 
       // Өгөгдлийг хадгалах
+      console.log("💾 Firestore-д өгөгдлийг хадгалж байна");
       await updatePoliceOfficerData(officerData.userId, fitData);
       setFitnessData(fitData);
+      console.log("✅ Өгөгдөл амжилттай хадгалагдлаа");
     } catch (err) {
+      console.error("❌ Өгөгдөл авахад алдаа гарлаа:", err);
       setError("Фитнесс өгөгдөл авахад алдаа гарлаа");
-      console.error(err);
     } finally {
       setLoading(false);
     }

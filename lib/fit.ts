@@ -1,6 +1,11 @@
 // lib/fit.ts
 export async function getGoogleFitData(accessToken: string) {
   try {
+    console.log(
+      "🔄 Google Fit API руу хүсэлт илгээж байна, токен:",
+      accessToken.substring(0, 10) + "..."
+    );
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const startTimeMillis = today.getTime();
@@ -35,13 +40,25 @@ export async function getGoogleFitData(accessToken: string) {
       }
     );
 
+    console.log(
+      "🌐 Google Fit API хариу код:",
+      response.status,
+      response.statusText
+    );
+
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ Google Fit API алдаа:", errorText);
       throw new Error(
-        `Google Fit API responded with ${response.status} ${response.statusText}`
+        `Google Fit API responded with ${response.status} ${response.statusText}: ${errorText}`
       );
     }
 
     const data = await response.json();
+    console.log(
+      "✅ Google Fit өгөгдөл авлаа:",
+      JSON.stringify(data).substring(0, 200) + "..."
+    );
 
     // Өгөгдөл боловсруулах
     let steps = 0;
@@ -68,49 +85,69 @@ export async function getGoogleFitData(accessToken: string) {
 
     const heartRate = heartRateCount > 0 ? heartRateSum / heartRateCount : 0;
 
-    return {
+    const result = {
       steps,
       heartRate: Math.round(heartRate),
       calories: Math.round(calories),
       rawData: data,
     };
+
+    console.log("✅ Боловсруулсан өгөгдөл:", result);
+    return result;
   } catch (error) {
-    console.error("Google Fit API error:", error);
+    console.error("❌ Google Fit API алдаа:", error);
     throw error;
   }
 }
 
-// Токеныг дахин авах функц
+// Google API-н токеныг шинэчлэх функц
 export async function refreshAccessToken(refreshToken: string) {
   try {
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    console.log(
+      "🔄 Токен шинэчилж байна, refresh token:",
+      refreshToken.substring(0, 10) + "..."
+    );
+
+    const response = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
-        client_id:
-          process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
-          process.env.GOOGLE_CLIENT_ID!,
-        client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-        refresh_token: refreshToken,
+        client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "",
+        client_secret: process.env.GOOGLE_CLIENT_SECRET || "",
         grant_type: "refresh_token",
+        refresh_token: refreshToken,
       }),
     });
 
-    const tokens = await tokenResponse.json();
-
-    if (!tokenResponse.ok) {
-      throw tokens;
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ Токен шинэчлэхэд алдаа гарлаа:", errorText);
+      throw new Error(
+        `Failed to refresh token: ${response.status} ${response.statusText}`
+      );
     }
+
+    const tokens = await response.json();
+    console.log("✅ Шинэ токен авлаа:", {
+      accessToken: tokens.access_token
+        ? tokens.access_token.substring(0, 10) + "..."
+        : "байхгүй",
+      expiresIn: tokens.expires_in,
+      tokenExpiry: Math.floor(Date.now() / 1000) + tokens.expires_in,
+      tokenType: tokens.token_type,
+    });
 
     return {
       accessToken: tokens.access_token,
+      expiresIn: tokens.expires_in,
       tokenExpiry: Math.floor(Date.now() / 1000) + tokens.expires_in,
+      tokenType: tokens.token_type,
     };
   } catch (error) {
-    console.error("Error refreshing access token:", error);
-    throw new Error("RefreshAccessTokenError");
+    console.error("❌ Токен шинэчлэх процесст алдаа гарлаа:", error);
+    throw error;
   }
 }
 

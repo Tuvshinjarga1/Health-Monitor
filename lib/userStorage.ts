@@ -12,7 +12,7 @@ export type UserTokenInfo = {
     calories: number;
     timestamp?: Date;
   };
-  supervisorId?: string; // Хянагч эмчийн ID
+  supervisorId?: string | null; // Хянагч эмчийн ID - can be string, null or undefined
 };
 
 // Сэсссэн мэдээллээс хэрэглэгчийн token хадгалах
