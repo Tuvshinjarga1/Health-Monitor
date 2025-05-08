@@ -100,6 +100,20 @@ export async function savePoliceOfficerData(
       return false;
     }
 
+    // 7 хоногийн хугацаатай болгох (хэрэв tokenExpiry дамжуулаагүй эсвэл хугацаа бага байвал)
+    const ONE_WEEK_IN_SECONDS = 7 * 24 * 60 * 60;
+    const now = Math.floor(Date.now() / 1000);
+    let finalTokenExpiry = tokenExpiry;
+
+    // Хэрэв tokenExpiry дамжуулаагүй эсвэл одоогоос 7 хоногоос бага байвал 7 хоногийн хугацаатай болгох
+    if (!finalTokenExpiry || finalTokenExpiry - now < ONE_WEEK_IN_SECONDS) {
+      finalTokenExpiry = now + ONE_WEEK_IN_SECONDS;
+      console.log(
+        "🔄 Токены хугацааг 7 хоног болгож өөрчиллөө:",
+        finalTokenExpiry
+      );
+    }
+
     // Fix the path (collection name) if needed. Make sure "officers" collection exists
     const collectionPath = "officers";
     console.log(
@@ -113,7 +127,7 @@ export async function savePoliceOfficerData(
       email,
       accessToken,
       refreshToken,
-      tokenExpiry,
+      tokenExpiry: finalTokenExpiry,
       lastUpdated: serverTimestamp(), // Серверийн timestamp ашиглах
     };
 
@@ -164,21 +178,78 @@ export async function savePoliceOfficerData(
 // Цагдаа ажилтны мэдээллийг шинэчлэх
 export async function updatePoliceOfficerData(
   officerId: string,
-  fitnessData: any
+  fitnessData: any,
+  tokens?: {
+    accessToken?: string;
+    refreshToken?: string;
+    tokenExpiry?: number;
+  }
 ) {
   try {
+    console.log("🔄 Ажилтны мэдээллийг шинэчилж байна:", {
+      officerId,
+      hasFitnessData: !!fitnessData,
+      hasTokens: !!tokens,
+      tokenInfo: tokens
+        ? {
+            hasAccessToken: !!tokens.accessToken,
+            hasRefreshToken: !!tokens.refreshToken,
+            hasTokenExpiry: !!tokens.tokenExpiry,
+          }
+        : null,
+    });
+
+    // Шинэчлэх өгөгдлийг бэлдэх
     const updateData: any = {
       lastUpdated: serverTimestamp(), // Серверийн timestamp ашиглах
     };
 
+    // Фитнес өгөгдөл байвал нэмэх
     if (fitnessData) {
       updateData.fitnessData = fitnessData;
+      console.log("📊 Фитнес өгөгдөл нэмж байна:", {
+        steps: fitnessData.steps,
+        heartRate: fitnessData.heartRate,
+        calories: fitnessData.calories,
+      });
     }
 
+    // Токен мэдээлэл байвал нэмэх
+    if (tokens) {
+      if (tokens.accessToken) {
+        updateData.accessToken = tokens.accessToken;
+        console.log("🔑 Access token шинэчилж байна");
+      }
+
+      if (tokens.refreshToken) {
+        updateData.refreshToken = tokens.refreshToken;
+        console.log("🔑 Refresh token шинэчилж байна");
+      }
+
+      if (tokens.tokenExpiry) {
+        updateData.tokenExpiry = tokens.tokenExpiry;
+        console.log("🔑 Token expiry шинэчилж байна:", tokens.tokenExpiry);
+      }
+    }
+
+    // Firestore руу хадгалах
+    console.log(
+      `📝 "${officerId}" ID-тай ажилтны мэдээллийг шинэчилж байна`,
+      updateData
+    );
     await updateDoc(doc(db, "officers", officerId), updateData);
+
+    // Шинэчлэлт амжилттай
+    console.log("✅ Ажилтны мэдээлэл амжилттай шинэчлэгдлээ:", officerId);
     return true;
   } catch (error) {
-    console.error("Error updating officer data:", error);
+    console.error("❌ Ажилтны мэдээлэл шинэчлэхэд алдаа гарлаа:", error);
+    if (error instanceof Error) {
+      console.error("❌ Алдааны дэлгэрэнгүй:", error.message);
+      if (error.stack) {
+        console.error("Stack trace:", error.stack);
+      }
+    }
     return false;
   }
 }

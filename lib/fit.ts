@@ -108,41 +108,118 @@ export async function refreshAccessToken(refreshToken: string) {
       refreshToken.substring(0, 10) + "..."
     );
 
+    // Шаардлагатай зүйлсийг шалгах
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+    // Тохиргооны утгуудыг логдох
+    console.log("🔑 Тохиргооны утгууд:", {
+      hasClientId: !!clientId,
+      clientIdLength: clientId?.length || 0,
+      hasClientSecret: !!clientSecret,
+      clientSecretLength: clientSecret?.length || 0,
+      clientIdStart: clientId?.substring(0, 5) || "N/A",
+      clientSecretStart: clientSecret?.substring(0, 5) || "N/A",
+    });
+
+    // Client ID, Client Secret шалгах
+    if (!clientId || !clientSecret) {
+      const error =
+        "Google API тохиргоо дутуу байна: " +
+        (!clientId ? "Client ID байхгүй" : "") +
+        (!clientSecret ? "Client Secret байхгүй" : "");
+      console.error("❌ " + error);
+      throw new Error(error);
+    }
+
+    // Параметрүүдийг бэлдэх
+    const params = new URLSearchParams();
+    params.append("client_id", clientId);
+    params.append("client_secret", clientSecret);
+    params.append("grant_type", "refresh_token");
+    params.append("refresh_token", refreshToken);
+
+    // Параметрүүдийг логдох (тест зорилгоор)
+    console.log("🔄 Токен шинэчлэх параметрүүд:", {
+      client_id_present: params.has("client_id"),
+      client_id_length: params.get("client_id")?.length || 0,
+      client_secret_present: params.has("client_secret"),
+      client_secret_length: params.get("client_secret")?.length || 0,
+      grant_type: params.get("grant_type"),
+      refresh_token_present: params.has("refresh_token"),
+      refresh_token_length: params.get("refresh_token")?.length || 0,
+      full_params_size: params.toString().length,
+    });
+
+    console.log("🔄 Токен шинэчлэх хүсэлт илгээж байна:", {
+      url: "https://oauth2.googleapis.com/token",
+      method: "POST",
+      contentType: "application/x-www-form-urlencoded",
+      paramsSize: params.toString().length,
+    });
+
     const response = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },
-      body: new URLSearchParams({
-        client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "",
-        client_secret: process.env.GOOGLE_CLIENT_SECRET || "",
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-      }),
+      body: params,
+    });
+
+    console.log("🌐 Токен шинэчлэх хариу:", {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("❌ Токен шинэчлэхэд алдаа гарлаа:", errorText);
-      throw new Error(
-        `Failed to refresh token: ${response.status} ${response.statusText}`
-      );
+      const errorData = await response.text();
+      console.error("❌ Токен шинэчлэхэд алдаа гарлаа:", errorData);
+      console.error("❌ Токен шинэчлэх хүсэлтийн дэлгэрэнгүй:", {
+        status: response.status,
+        url: response.url,
+        params_summary: {
+          has_client_id: params.has("client_id"),
+          has_client_secret: params.has("client_secret"),
+          has_refresh_token: params.has("refresh_token"),
+        },
+      });
+
+      // Алдааны төрлийг тодорхойлох
+      let errorMessage = `Failed to refresh token: ${response.status} ${response.statusText}`;
+      if (errorData.includes("invalid_client")) {
+        errorMessage =
+          "Google OAuth client_id эсвэл client_secret буруу байна.";
+      } else if (errorData.includes("invalid_grant")) {
+        errorMessage =
+          "Refresh token хүчингүй болсон. Дахин нэвтрэх шаардлагатай.";
+      } else if (errorData.includes("client_id")) {
+        errorMessage = "Client ID байхгүй байна. Тохиргоогоо шалгана уу.";
+      }
+
+      throw new Error(errorMessage);
     }
 
     const tokens = await response.json();
+
+    // Токены хугацааг 7 хоног болгох (604800 секунд)
+    const ONE_WEEK_IN_SECONDS = 7 * 24 * 60 * 60; // 7 хоног хугацаатай болгох
+    const tokenExpiry = Math.floor(Date.now() / 1000) + ONE_WEEK_IN_SECONDS;
+
     console.log("✅ Шинэ токен авлаа:", {
       accessToken: tokens.access_token
         ? tokens.access_token.substring(0, 10) + "..."
         : "байхгүй",
-      expiresIn: tokens.expires_in,
-      tokenExpiry: Math.floor(Date.now() / 1000) + tokens.expires_in,
+      originalExpiresIn: tokens.expires_in,
+      newExpiresIn: ONE_WEEK_IN_SECONDS,
+      tokenExpiry: tokenExpiry,
       tokenType: tokens.token_type,
     });
 
     return {
       accessToken: tokens.access_token,
-      expiresIn: tokens.expires_in,
-      tokenExpiry: Math.floor(Date.now() / 1000) + tokens.expires_in,
+      expiresIn: ONE_WEEK_IN_SECONDS,
+      tokenExpiry: tokenExpiry,
       tokenType: tokens.token_type,
     };
   } catch (error) {

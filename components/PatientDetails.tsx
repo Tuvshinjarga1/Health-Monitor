@@ -65,10 +65,13 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
   const fetchFitnessData = async (officerData: UserTokenInfo) => {
     try {
       setLoading(true);
+      setError(null);
 
-      // Токен хугацаа дууссан эсэхийг шалгах
       const now = Math.floor(Date.now() / 1000);
       let accessToken = officerData.accessToken;
+      let tokenExpiry = officerData.tokenExpiry;
+      let refreshToken = officerData.refreshToken;
+      let tokensUpdated = false;
 
       console.log("🔐 Токены хугацаа шалгаж байна:", {
         now,
@@ -79,34 +82,135 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
       if (now > officerData.tokenExpiry) {
         // Токен шинэчлэх
         console.log("🔄 Токен хугацаа дууссан, шинэчилж байна");
-        const newTokens = await refreshAccessToken(officerData.refreshToken);
-        accessToken = newTokens.accessToken;
+        try {
+          const newTokens = await refreshAccessToken(officerData.refreshToken);
+          accessToken = newTokens.accessToken;
+          tokenExpiry = newTokens.tokenExpiry;
+          tokensUpdated = true;
 
-        console.log("✅ Шинэ токен авлаа:", {
-          accessToken: accessToken
-            ? accessToken.substring(0, 10) + "..."
-            : "байхгүй",
-          tokenExpiry: newTokens.tokenExpiry,
-        });
+          console.log("✅ Шинэ токен авлаа:", {
+            accessToken: accessToken
+              ? accessToken.substring(0, 10) + "..."
+              : "байхгүй",
+            tokenExpiry: newTokens.tokenExpiry,
+          });
 
-        // Шинэ токеныг хадгалах
-        await updatePoliceOfficerData(officerData.userId, undefined);
+          // Токенуудыг Firestore-д хадгалах
+          await updatePoliceOfficerData(
+            officerData.userId,
+            {}, // Хоосон фитнесс өгөгдөл
+            {
+              accessToken,
+              refreshToken,
+              tokenExpiry,
+            }
+          );
+
+          // Хэрэглэгчийн мэдээллийг шинэчлэх
+          const updatedOfficerData = {
+            ...officerData,
+            accessToken,
+            tokenExpiry,
+            refreshToken,
+          };
+          setPatient(updatedOfficerData);
+        } catch (refreshError) {
+          console.error(
+            "⚠️ Токен шинэчлэхэд алдаа гарлаа, хуучин токеныг ашиглахыг оролдоно:",
+            refreshError
+          );
+
+          // Хэрэв алдаа бол client_id-тай холбоотой алдаа мөн эсэхийг шалгах
+          const errorMessage =
+            refreshError instanceof Error
+              ? refreshError.message
+              : String(refreshError);
+          const isClientIdError =
+            errorMessage.includes("client") && errorMessage.includes("ID");
+
+          if (isClientIdError) {
+            console.log("🔧 Client ID алдаа, манай засварын арга ашиглах");
+            // Хуучин токеныг ашиглах болон алдааг хүлээн зөвшөөрч дараагийн кодыг үргэлжлүүлнэ
+          } else {
+            throw refreshError; // Бусад төрлийн алдаа бол дахин үүсгэнэ
+          }
+        }
       } else {
         console.log("✅ Токен хүчинтэй байна");
       }
 
       // Google Fit-ээс өгөгдөл авах
       console.log("🔍 Google Fit-ээс өгөгдөл татаж байна");
-      const fitData = await getGoogleFitData(accessToken);
+      try {
+        const fitData = await getGoogleFitData(accessToken);
 
-      // Өгөгдлийг хадгалах
-      console.log("💾 Firestore-д өгөгдлийг хадгалж байна");
-      await updatePoliceOfficerData(officerData.userId, fitData);
-      setFitnessData(fitData);
-      console.log("✅ Өгөгдөл амжилттай хадгалагдлаа");
+        // Өгөгдлийг хадгалах
+        console.log("💾 Firestore-д өгөгдлийг хадгалж байна:", fitData);
+
+        // Хэрэв токенууд шинэчлэгдсэн бол, бүх мэдээллийг хамт хадгалах
+        let updateSuccess = false;
+        if (tokensUpdated) {
+          updateSuccess = await updatePoliceOfficerData(
+            officerData.userId,
+            fitData,
+            {
+              accessToken,
+              refreshToken,
+              tokenExpiry,
+            }
+          );
+        } else {
+          // Зөвхөн фитнесс мэдээллийг хадгалах
+          updateSuccess = await updatePoliceOfficerData(
+            officerData.userId,
+            fitData
+          );
+        }
+
+        if (updateSuccess) {
+          console.log("✅ Өгөгдөл амжилттай хадгалагдлаа");
+
+          // UI-д мэдээллийг шинэчлэх
+          setFitnessData(fitData);
+
+          // Хэрэглэгчийн мэдээллийг шинэчлэх
+          setPatient((prev) => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              fitnessData: fitData,
+              lastUpdated: new Date(),
+              ...(tokensUpdated
+                ? { accessToken, tokenExpiry, refreshToken }
+                : {}),
+            };
+          });
+        } else {
+          console.error("❌ Өгөгдөл хадгалахад алдаа гарлаа");
+          setError("Өгөгдөл хадгалахад алдаа гарлаа. Дахин оролдоно уу.");
+        }
+      } catch (fitError) {
+        // Хэрэв токен хугацаа дууссан гэсэн алдаа бол
+        const errorMessage =
+          fitError instanceof Error ? fitError.message : String(fitError);
+        if (errorMessage.includes("401") || errorMessage.includes("auth")) {
+          console.error(
+            "🔄 Токен хугацаа дууссан болох магадлалтай, хэрэглэгчийг дахин холбохыг зөвлөж байна"
+          );
+          setError(
+            "Хэрэглэгчийн нэвтрэх эрх дууссан байна. Дахин холбохыг зөвлөж байна."
+          );
+        } else {
+          // Бусад алдаа
+          throw fitError;
+        }
+      }
     } catch (err) {
       console.error("❌ Өгөгдөл авахад алдаа гарлаа:", err);
-      setError("Фитнесс өгөгдөл авахад алдаа гарлаа");
+      setError(
+        "Фитнесс өгөгдөл авахад алдаа гарлаа: " +
+          (err instanceof Error ? err.message : String(err))
+      );
     } finally {
       setLoading(false);
     }
@@ -130,43 +234,103 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
-      <div className="flex justify-between items-start mb-6">
-        <div>
-          <h3 className="text-2xl font-bold">{patient.name}</h3>
-          <p className="text-gray-600">{patient.email}</p>
-          <p className="text-sm text-gray-500 mt-1">
-            Сүүлд шинэчилсэн:{" "}
-            {patient.lastUpdated && formatDate(new Date(patient.lastUpdated))}
-            {patient.lastUpdated &&
-              ` (${getTimeSince(new Date(patient.lastUpdated))})`}
-          </p>
+    <div className="p-6">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-start mb-6 gap-4">
+        <div className="flex items-center">
+          <div className="h-14 w-14 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center mr-4 text-white text-xl font-bold">
+            {patient.name ? patient.name.charAt(0).toUpperCase() : "?"}
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-white">{patient.name}</h3>
+            <p className="text-gray-400">{patient.email}</p>
+            <p className="text-sm text-gray-500 mt-1 flex items-center">
+              <svg
+                className="h-4 w-4 mr-1"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {patient.lastUpdated && formatDate(new Date(patient.lastUpdated))}
+              {patient.lastUpdated &&
+                ` (${getTimeSince(new Date(patient.lastUpdated))})`}
+            </p>
+          </div>
         </div>
 
         <button
           onClick={handleRefresh}
           disabled={loading}
-          className={`px-4 py-2 rounded ${
-            loading ? "bg-gray-300" : "bg-blue-500 hover:bg-blue-600"
+          className={`px-4 py-2 rounded-lg flex items-center transition-all duration-200 transform ${
+            loading
+              ? "bg-gray-700 cursor-wait"
+              : "bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 hover:shadow-lg hover:-translate-y-1"
           } text-white`}
         >
+          <svg
+            className={`h-5 w-5 mr-2 ${loading ? "animate-spin" : ""}`}
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
           {loading ? "Шинэчилж байна..." : "Шинэчлэх"}
         </button>
       </div>
 
+      {error && (
+        <div className="bg-red-500 bg-opacity-20 border-l-4 border-red-500 rounded-lg p-4 mb-6 animate-pulse">
+          <p className="text-red-100">{error}</p>
+        </div>
+      )}
+
       {fitnessData ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-          <div className="bg-blue-50 p-4 rounded-lg">
-            <h4 className="text-lg font-semibold text-blue-700">Алхалт</h4>
-            <p className="text-3xl font-bold mt-2">
-              {fitnessData.steps.toLocaleString()} алхам
-            </p>
-            <p className="text-sm text-gray-600 mt-1">
-              Өнөөдрийн зорилт: 8,000
-            </p>
-            <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+          <div className="bg-gradient-to-br from-blue-900 to-blue-800 p-5 rounded-xl shadow-lg border border-blue-700">
+            <div className="flex items-center mb-3">
+              <div className="h-10 w-10 bg-blue-800 bg-opacity-50 rounded-full flex items-center justify-center mr-3">
+                <svg
+                  className="h-5 w-5 text-blue-300"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </div>
+              <h4 className="text-lg font-semibold text-blue-100">Алхалт</h4>
+            </div>
+            <div className="flex items-baseline">
+              <p className="text-3xl font-bold text-white">
+                {fitnessData.steps.toLocaleString()}
+              </p>
+              <p className="ml-2 text-blue-300">алхам</p>
+            </div>
+            <div className="flex justify-between items-center mt-2 text-sm">
+              <p className="text-blue-200">
+                Зорилт: <span className="font-medium">8,000</span>
+              </p>
+              <p className="text-blue-200">
+                {Math.min(100, Math.round((fitnessData.steps / 8000) * 100))}%
+              </p>
+            </div>
+            <div className="w-full bg-blue-900 rounded-full h-2.5 mt-2 overflow-hidden">
               <div
-                className="bg-blue-600 h-2.5 rounded-full"
+                className="bg-blue-400 h-2.5 rounded-full"
                 style={{
                   width: `${Math.min(100, (fitnessData.steps / 8000) * 100)}%`,
                 }}
@@ -174,31 +338,121 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
             </div>
           </div>
 
-          <div className="bg-red-50 p-4 rounded-lg">
-            <h4 className="text-lg font-semibold text-red-700">
-              Зүрхний цохилт
-            </h4>
-            <p className="text-3xl font-bold mt-2">
-              {fitnessData.heartRate} BPM
-            </p>
-            <p className="text-sm text-gray-600 mt-1">
-              {fitnessData.heartRate > 100 ? "Хэвийн бус" : "Хэвийн"}
-            </p>
+          <div
+            className={`bg-gradient-to-br ${
+              fitnessData.heartRate > 100
+                ? "from-red-900 to-red-800 border-red-700"
+                : "from-rose-900 to-rose-800 border-rose-700"
+            } p-5 rounded-xl shadow-lg border`}
+          >
+            <div className="flex items-center mb-3">
+              <div
+                className={`h-10 w-10 ${
+                  fitnessData.heartRate > 100 ? "bg-red-800" : "bg-rose-800"
+                } bg-opacity-50 rounded-full flex items-center justify-center mr-3`}
+              >
+                <svg
+                  className={`h-5 w-5 ${
+                    fitnessData.heartRate > 100
+                      ? "text-red-300"
+                      : "text-rose-300"
+                  }`}
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </div>
+              <h4
+                className={`text-lg font-semibold ${
+                  fitnessData.heartRate > 100 ? "text-red-100" : "text-rose-100"
+                }`}
+              >
+                Зүрхний цохилт
+              </h4>
+            </div>
+            <div className="flex items-baseline">
+              <p className="text-3xl font-bold text-white">
+                {fitnessData.heartRate}
+              </p>
+              <p
+                className={`ml-2 ${
+                  fitnessData.heartRate > 100 ? "text-red-300" : "text-rose-300"
+                }`}
+              >
+                BPM
+              </p>
+            </div>
+            <div className="mt-2">
+              <span
+                className={`inline-block px-2.5 py-0.5 rounded-full text-sm font-medium ${
+                  fitnessData.heartRate > 100
+                    ? "bg-red-800 text-red-200"
+                    : "bg-green-800 text-green-200"
+                }`}
+              >
+                {fitnessData.heartRate > 100 ? "Хэвийн бус" : "Хэвийн"}
+              </span>
+            </div>
+            {fitnessData.heartRate > 100 && (
+              <div className="flex items-center mt-2 text-sm text-red-300">
+                <svg
+                  className="h-4 w-4 mr-1 text-red-300"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                Анхаарал хандуулах шаардлагатай
+              </div>
+            )}
           </div>
 
-          <div className="bg-green-50 p-4 rounded-lg">
-            <h4 className="text-lg font-semibold text-green-700">
-              Зарцуулсан калори
-            </h4>
-            <p className="text-3xl font-bold mt-2">
-              {fitnessData.calories.toLocaleString()} ккал
-            </p>
-            <p className="text-sm text-gray-600 mt-1">
-              Өнөөдрийн зорилт: 2,000
-            </p>
-            <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+          <div className="bg-gradient-to-br from-green-900 to-green-800 p-5 rounded-xl shadow-lg border border-green-700">
+            <div className="flex items-center mb-3">
+              <div className="h-10 w-10 bg-green-800 bg-opacity-50 rounded-full flex items-center justify-center mr-3">
+                <svg
+                  className="h-5 w-5 text-green-300"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M12.395 2.553a1 1 0 00-1.45-.385c-.345.23-.614.558-.822.88-.214.33-.403.713-.57 1.116-.334.804-.614 1.768-.84 2.734a31.365 31.365 0 00-.613 3.58 2.64 2.64 0 01-.945-1.067c-.328-.68-.398-1.534-.398-2.654A1 1 0 005.05 6.05 6.981 6.981 0 003 11a7 7 0 1011.95-4.95c-.592-.591-.98-.985-1.348-1.467-.363-.476-.724-1.063-1.207-2.03zM12.12 15.12A3 3 0 017 13s.879.5 2.5.5c0-1 .5-4 1.25-4.5.5 1 .786 1.293 1.371 1.879A2.99 2.99 0 0113 13a2.99 2.99 0 01-.879 2.121z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </div>
+              <h4 className="text-lg font-semibold text-green-100">
+                Зарцуулсан калори
+              </h4>
+            </div>
+            <div className="flex items-baseline">
+              <p className="text-3xl font-bold text-white">
+                {fitnessData.calories.toLocaleString()}
+              </p>
+              <p className="ml-2 text-green-300">ккал</p>
+            </div>
+            <div className="flex justify-between items-center mt-2 text-sm">
+              <p className="text-green-200">
+                Зорилт: <span className="font-medium">2,000</span>
+              </p>
+              <p className="text-green-200">
+                {Math.min(100, Math.round((fitnessData.calories / 2000) * 100))}
+                %
+              </p>
+            </div>
+            <div className="w-full bg-green-900 rounded-full h-2.5 mt-2 overflow-hidden">
               <div
-                className="bg-green-600 h-2.5 rounded-full"
+                className="bg-green-400 h-2.5 rounded-full"
                 style={{
                   width: `${Math.min(
                     100,
@@ -210,17 +464,18 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
           </div>
         </div>
       ) : (
-        <div className="text-center py-8 text-gray-500">
-          Фитнесс өгөгдөл ачааллаж байна...
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="w-16 h-16 rounded-full border-4 border-blue-500 border-t-transparent animate-spin mb-6"></div>
+          <p className="text-gray-400">Фитнесс өгөгдөл ачааллаж байна...</p>
         </div>
       )}
 
       {fitnessData && fitnessData.heartRate > 100 && (
-        <div className="mt-6 bg-yellow-50 border-l-4 border-yellow-400 p-4">
+        <div className="mt-6 bg-amber-500 bg-opacity-20 border-l-4 border-amber-500 rounded-lg p-4">
           <div className="flex">
             <div className="flex-shrink-0">
               <svg
-                className="h-5 w-5 text-yellow-400"
+                className="h-6 w-6 text-amber-500"
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 20 20"
                 fill="currentColor"
@@ -233,10 +488,10 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
               </svg>
             </div>
             <div className="ml-3">
-              <h3 className="text-sm font-medium text-yellow-800">
+              <h3 className="text-lg font-medium text-amber-300">
                 Анхааруулга
               </h3>
-              <div className="mt-2 text-sm text-yellow-700">
+              <div className="mt-2 text-sm text-amber-200">
                 <p>
                   Ажилтны зүрхний цохилт хэвийн бус өндөр байна. Амрах, усны
                   хангамж зэргийг шалгах шаардлагатай.
