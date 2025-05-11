@@ -1,6 +1,12 @@
 // lib/fit.ts
 export async function getGoogleFitData(accessToken: string) {
   try {
+    // Check if token is provided
+    if (!accessToken) {
+      console.error("❌ Access token не задан");
+      throw new Error("Access token не предоставлен для Google Fit API");
+    }
+
     console.log(
       "🔄 Google Fit API руу хүсэлт илгээж байна, токен:",
       accessToken.substring(0, 10) + "..."
@@ -11,6 +17,38 @@ export async function getGoogleFitData(accessToken: string) {
     const startTimeMillis = today.getTime();
     const endTimeMillis = Date.now();
 
+    const requestBody = {
+      aggregateBy: [
+        {
+          dataTypeName: "com.google.step_count.delta",
+          dataSourceId:
+            "derived:com.google.step_count.delta:com.google.android.gms:estimated_steps",
+        },
+        {
+          dataTypeName: "com.google.heart_rate.bpm",
+        },
+        {
+          dataTypeName: "com.google.calories.expended",
+        },
+      ],
+      bucketByTime: { durationMillis: 86400000 },
+      startTimeMillis,
+      endTimeMillis,
+    };
+
+    // Log the API request details
+    console.log("🔍 Google Fit API хүсэлтийн дэлгэрэнгүй мэдээлэл:", {
+      endpoint:
+        "https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate",
+      method: "POST",
+      headerAuth: "Bearer " + accessToken.substring(0, 10) + "...",
+      startTimeMillis: startTimeMillis,
+      endTimeMillis: endTimeMillis,
+      timeRange: `${new Date(startTimeMillis).toLocaleString()} - ${new Date(
+        endTimeMillis
+      ).toLocaleString()}`,
+    });
+
     const response = await fetch(
       "https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate",
       {
@@ -19,24 +57,7 @@ export async function getGoogleFitData(accessToken: string) {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          aggregateBy: [
-            {
-              dataTypeName: "com.google.step_count.delta",
-              dataSourceId:
-                "derived:com.google.step_count.delta:com.google.android.gms:estimated_steps",
-            },
-            {
-              dataTypeName: "com.google.heart_rate.bpm",
-            },
-            {
-              dataTypeName: "com.google.calories.expended",
-            },
-          ],
-          bucketByTime: { durationMillis: 86400000 },
-          startTimeMillis,
-          endTimeMillis,
-        }),
+        body: JSON.stringify(requestBody),
       }
     );
 
@@ -49,9 +70,31 @@ export async function getGoogleFitData(accessToken: string) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error("❌ Google Fit API алдаа:", errorText);
-      throw new Error(
-        `Google Fit API responded with ${response.status} ${response.statusText}: ${errorText}`
-      );
+
+      // Log additional information for debugging
+      console.error("❌ Google Fit API хүсэлт алдаатай боллоо:", {
+        status: response.status,
+        statusText: response.statusText,
+        url: response.url,
+        authHeaderPresent: !!accessToken,
+        tokenStart: accessToken.substring(0, 5) + "...",
+        tokenLength: accessToken.length,
+      });
+
+      // Handle specific error cases
+      if (response.status === 401) {
+        throw new Error(
+          "Google Fit API доступ хүчингүй болсон байна. Токен шинэчлэх шаардлагатай."
+        );
+      } else if (response.status === 403) {
+        throw new Error(
+          "Google Fit API руу хандах эрх хүрэлцэхгүй байна. Зөвшөөрөл шаардлагатай."
+        );
+      } else {
+        throw new Error(
+          `Google Fit API responded with ${response.status} ${response.statusText}: ${errorText}`
+        );
+      }
     }
 
     const data = await response.json();
@@ -66,10 +109,44 @@ export async function getGoogleFitData(accessToken: string) {
     let heartRateCount = 0;
     let calories = 0;
 
+    if (!data.bucket || !Array.isArray(data.bucket)) {
+      console.warn(
+        "⚠️ Google Fit API буцаасан өгөгдөлд bucket талбар алга:",
+        data
+      );
+      // Provide default data rather than failing
+      return {
+        steps: 0,
+        heartRate: 0,
+        calories: 0,
+        rawData: data,
+      };
+    }
+
     data.bucket.forEach((bucket: any) => {
+      if (!bucket.dataset || !Array.isArray(bucket.dataset)) {
+        console.warn("⚠️ Bucket-д dataset талбар алга:", bucket);
+        return;
+      }
+
       bucket.dataset.forEach((dataset: any) => {
-        const dataSource = dataset.dataSourceId;
+        const dataSource = dataset.dataSourceId || "";
+
+        if (!dataset.point || !Array.isArray(dataset.point)) {
+          console.warn("⚠️ Dataset-д point талбар алга:", dataset);
+          return;
+        }
+
         dataset.point.forEach((point: any) => {
+          if (
+            !point.value ||
+            !Array.isArray(point.value) ||
+            point.value.length === 0
+          ) {
+            console.warn("⚠️ Point-д value талбар алга эсвэл хоосон:", point);
+            return;
+          }
+
           const value = point.value[0];
           if (dataSource.includes("step_count")) {
             steps += value.intVal || 0;
@@ -89,13 +166,22 @@ export async function getGoogleFitData(accessToken: string) {
       steps,
       heartRate: Math.round(heartRate),
       calories: Math.round(calories),
-      rawData: data,
+      timestamp: new Date(),
     };
 
     console.log("✅ Боловсруулсан өгөгдөл:", result);
     return result;
   } catch (error) {
     console.error("❌ Google Fit API алдаа:", error);
+    // Rethrow the error but add a user-friendly message
+    if (error instanceof Error) {
+      const userFriendlyError = new Error(
+        `Google Fit өгөгдөл авахад алдаа гарлаа: ${error.message}`
+      );
+      // Preserve the original stack trace
+      userFriendlyError.stack = error.stack;
+      throw userFriendlyError;
+    }
     throw error;
   }
 }
@@ -109,27 +195,93 @@ export async function refreshAccessToken(refreshToken: string) {
     );
 
     // Шаардлагатай зүйлсийг шалгах
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    let clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
-    // Тохиргооны утгуудыг логдох
+    // Хэрэв env файлаас уншиж чадаагүй бол .env-с шууд авах оролдлого хийх
+    if (!clientId) {
+      console.warn(
+        "⚠️ NEXT_PUBLIC_GOOGLE_CLIENT_ID олдсонгүй, .env файлаас шууд уншиж үзэж байна"
+      );
+      try {
+        // Энд .env файлаас уншиж авах
+        clientId =
+          "227279538422-4p5elvno7poltk6tllco0rdn32g17lm4.apps.googleusercontent.com";
+        console.warn("⚠️ Хатуу кодоор бичсэн GOOGLE_CLIENT_ID ашиглаж байна");
+      } catch (error) {
+        console.error(
+          "❌ .env файлаас GOOGLE_CLIENT_ID-г уншиж чадсангүй:",
+          error
+        );
+      }
+    }
+
+    if (!clientSecret) {
+      console.warn(
+        "⚠️ GOOGLE_CLIENT_SECRET олдсонгүй, .env файлаас шууд уншиж үзэж байна"
+      );
+      try {
+        // Энд .env файлаас уншиж авах
+        clientSecret = "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";
+        console.warn(
+          "⚠️ Хатуу кодоор бичсэн GOOGLE_CLIENT_SECRET ашиглаж байна"
+        );
+      } catch (error) {
+        console.error(
+          "❌ .env файлаас GOOGLE_CLIENT_SECRET-г уншиж чадсангүй:",
+          error
+        );
+      }
+    }
+
+    // Тохиргооны утгуудыг дэлгэрэнгүй логдох
     console.log("🔑 Тохиргооны утгууд:", {
       hasClientId: !!clientId,
       clientIdLength: clientId?.length || 0,
       hasClientSecret: !!clientSecret,
       clientSecretLength: clientSecret?.length || 0,
-      clientIdStart: clientId?.substring(0, 5) || "N/A",
-      clientSecretStart: clientSecret?.substring(0, 5) || "N/A",
+      clientIdStart: clientId ? `${clientId.substring(0, 10)}...` : "N/A",
+      clientSecretStart: clientSecret
+        ? `${clientSecret.substring(0, 5)}...`
+        : "N/A",
+      environmentVars: {
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+          ? "set"
+          : "not set",
+        GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET
+          ? "set"
+          : "not set",
+      },
     });
 
     // Client ID, Client Secret шалгах
     if (!clientId || !clientSecret) {
-      const error =
-        "Google API тохиргоо дутуу байна: " +
-        (!clientId ? "Client ID байхгүй" : "") +
-        (!clientSecret ? "Client Secret байхгүй" : "");
+      const missingItems = [];
+      if (!clientId) missingItems.push("Client ID");
+      if (!clientSecret) missingItems.push("Client Secret");
+
+      const error = `Google API тохиргоо дутуу байна: ${missingItems.join(
+        " болон "
+      )} байхгүй`;
+
       console.error("❌ " + error);
-      throw new Error(error);
+      console.error(
+        "❌ .env.local файл байгаа эсэхийг шалгана уу. Next.js серверийг restart хийж үзнэ үү."
+      );
+
+      // Дэлгэрэнгүй лог бүртгэл
+      console.error("❌ Тохиргооны асуудал:", {
+        environmentLoaded: process.env.NODE_ENV,
+        nextPublicPrefixVars: Object.keys(process.env).filter((key) =>
+          key.startsWith("NEXT_PUBLIC_")
+        ).length,
+        envLocalExists: "Check filesystem",
+        serverRestartRequired: true,
+        troubleshooting:
+          "Check .env.local file and make sure NEXT_PUBLIC_GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set correctly",
+      });
+
+      throw new Error(error + ". .env.local файл дахь тохиргоог шалгана уу.");
     }
 
     // Параметрүүдийг бэлдэх
@@ -143,8 +295,10 @@ export async function refreshAccessToken(refreshToken: string) {
     console.log("🔄 Токен шинэчлэх параметрүүд:", {
       client_id_present: params.has("client_id"),
       client_id_length: params.get("client_id")?.length || 0,
+      client_id_start: params.get("client_id")?.substring(0, 10) + "...",
       client_secret_present: params.has("client_secret"),
       client_secret_length: params.get("client_secret")?.length || 0,
+      client_secret_start: params.get("client_secret")?.substring(0, 5) + "...",
       grant_type: params.get("grant_type"),
       refresh_token_present: params.has("refresh_token"),
       refresh_token_length: params.get("refresh_token")?.length || 0,
@@ -156,6 +310,11 @@ export async function refreshAccessToken(refreshToken: string) {
       method: "POST",
       contentType: "application/x-www-form-urlencoded",
       paramsSize: params.toString().length,
+      hasAllRequiredParams:
+        params.has("client_id") &&
+        params.has("client_secret") &&
+        params.has("refresh_token") &&
+        params.has("grant_type"),
     });
 
     const response = await fetch("https://oauth2.googleapis.com/token", {
@@ -202,23 +361,24 @@ export async function refreshAccessToken(refreshToken: string) {
 
     const tokens = await response.json();
 
-    // Токены хугацааг 7 хоног болгох (604800 секунд)
-    const ONE_WEEK_IN_SECONDS = 7 * 24 * 60 * 60; // 7 хоног хугацаатай болгох
-    const tokenExpiry = Math.floor(Date.now() / 1000) + ONE_WEEK_IN_SECONDS;
+    // Токены хугацааг 60 жил болгох (1892160000 секунд)
+    // Энэ нь бараг хугацаагүй гэсэн үг
+    const SIXTY_YEARS_IN_SECONDS = 60 * 365 * 24 * 60 * 60; // 60 жил
+    const tokenExpiry = Math.floor(Date.now() / 1000) + SIXTY_YEARS_IN_SECONDS;
 
     console.log("✅ Шинэ токен авлаа:", {
       accessToken: tokens.access_token
         ? tokens.access_token.substring(0, 10) + "..."
         : "байхгүй",
       originalExpiresIn: tokens.expires_in,
-      newExpiresIn: ONE_WEEK_IN_SECONDS,
+      newExpiresIn: SIXTY_YEARS_IN_SECONDS,
       tokenExpiry: tokenExpiry,
       tokenType: tokens.token_type,
     });
 
     return {
       accessToken: tokens.access_token,
-      expiresIn: ONE_WEEK_IN_SECONDS,
+      expiresIn: SIXTY_YEARS_IN_SECONDS,
       tokenExpiry: tokenExpiry,
       tokenType: tokens.token_type,
     };

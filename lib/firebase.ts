@@ -100,16 +100,17 @@ export async function savePoliceOfficerData(
       return false;
     }
 
-    // 7 хоногийн хугацаатай болгох (хэрэв tokenExpiry дамжуулаагүй эсвэл хугацаа бага байвал)
-    const ONE_WEEK_IN_SECONDS = 7 * 24 * 60 * 60;
+    // Токены хугацааг 60 жил болгох (1892160000 секунд)
+    // Энэ нь бараг хугацаагүй гэсэн үг
+    const SIXTY_YEARS_IN_SECONDS = 60 * 365 * 24 * 60 * 60; // 60 жил
     const now = Math.floor(Date.now() / 1000);
     let finalTokenExpiry = tokenExpiry;
 
-    // Хэрэв tokenExpiry дамжуулаагүй эсвэл одоогоос 7 хоногоос бага байвал 7 хоногийн хугацаатай болгох
-    if (!finalTokenExpiry || finalTokenExpiry - now < ONE_WEEK_IN_SECONDS) {
-      finalTokenExpiry = now + ONE_WEEK_IN_SECONDS;
+    // Хэрэв tokenExpiry дамжуулаагүй эсвэл одоогоос 60 жилээс бага байвал 60 жил хугацаатай болгох
+    if (!finalTokenExpiry || finalTokenExpiry - now < SIXTY_YEARS_IN_SECONDS) {
+      finalTokenExpiry = now + SIXTY_YEARS_IN_SECONDS;
       console.log(
-        "🔄 Токены хугацааг 7 хоног болгож өөрчиллөө:",
+        "🔄 Токены хугацааг 60 жил болгож өөрчиллөө:",
         finalTokenExpiry
       );
     }

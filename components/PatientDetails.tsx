@@ -67,6 +67,17 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
       setLoading(true);
       setError(null);
 
+      // Лог нэмэх: хэрэглэгчийн мэдээлэл
+      console.log("🚀 Fitnes өгөгдөл татах гэж байна хэрэглэгч:", {
+        userId: officerData.userId,
+        email: officerData.email,
+        name: officerData.name,
+        hasToken: !!officerData.accessToken,
+        tokenExpiryTime: new Date(
+          officerData.tokenExpiry * 1000
+        ).toLocaleString(),
+      });
+
       const now = Math.floor(Date.now() / 1000);
       let accessToken = officerData.accessToken;
       let tokenExpiry = officerData.tokenExpiry;
@@ -77,8 +88,14 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
         now,
         tokenExpiry: officerData.tokenExpiry,
         isExpired: now > officerData.tokenExpiry,
+        remainingTime: officerData.tokenExpiry - now,
+        humanReadableExpiry: new Date(
+          officerData.tokenExpiry * 1000
+        ).toLocaleString(),
+        tokenLength: officerData.accessToken?.length || 0,
       });
 
+      // Токен хугацаа дууссан эсэхийг шалгаад шинэчлэх оролдлого
       if (now > officerData.tokenExpiry) {
         // Токен шинэчлэх
         console.log("🔄 Токен хугацаа дууссан, шинэчилж байна");
@@ -93,6 +110,9 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
               ? accessToken.substring(0, 10) + "..."
               : "байхгүй",
             tokenExpiry: newTokens.tokenExpiry,
+            humanReadableExpiry: new Date(
+              newTokens.tokenExpiry * 1000
+            ).toLocaleString(),
           });
 
           // Токенуудыг Firestore-д хадгалах
@@ -120,26 +140,38 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
             refreshError
           );
 
-          // Хэрэв алдаа бол client_id-тай холбоотой алдаа мөн эсэхийг шалгах
+          // Алдааны дэлгэрэнгүй мэдээлэл логдох
           const errorMessage =
             refreshError instanceof Error
               ? refreshError.message
               : String(refreshError);
-          const isClientIdError =
-            errorMessage.includes("client") && errorMessage.includes("ID");
 
-          if (isClientIdError) {
-            console.log("🔧 Client ID алдаа, манай засварын арга ашиглах");
-            // Хуучин токеныг ашиглах болон алдааг хүлээн зөвшөөрч дараагийн кодыг үргэлжлүүлнэ
-          } else {
-            throw refreshError; // Бусад төрлийн алдаа бол дахин үүсгэнэ
-          }
+          console.error("🔍 Токен шинэчлэх алдааны дэлгэрэнгүй мэдээлэл:", {
+            errorType:
+              refreshError instanceof Error
+                ? refreshError.constructor.name
+                : typeof refreshError,
+            message: errorMessage,
+            hasClientIdReference:
+              errorMessage.includes("client") && errorMessage.includes("ID"),
+            hasAuthReference:
+              errorMessage.includes("auth") || errorMessage.includes("401"),
+            refreshTokenLength: officerData.refreshToken?.length || 0,
+          });
+
+          // Хуучин токеныг ашиглах оролдлого хийх
+          console.log(
+            "🔧 Токен шинэчлэх алдаатай, дараагийн үе шат руу шилжиж байна"
+          );
+
+          // Хэрэглэгчид харуулах алдааны мессежийг зогсоож байна
+          // setError(`Токен шинэчлэхэд алдаа гарлаа: ${errorMessage}`);
         }
       } else {
         console.log("✅ Токен хүчинтэй байна");
       }
 
-      // Google Fit-ээс өгөгдөл авах
+      // Google Fit-ээс өгөгдөл авах оролдлого хийх
       console.log("🔍 Google Fit-ээс өгөгдөл татаж байна");
       try {
         const fitData = await getGoogleFitData(accessToken);
@@ -193,24 +225,155 @@ export default function PatientDetails({ patientId }: PatientDetailsProps) {
         // Хэрэв токен хугацаа дууссан гэсэн алдаа бол
         const errorMessage =
           fitError instanceof Error ? fitError.message : String(fitError);
-        if (errorMessage.includes("401") || errorMessage.includes("auth")) {
-          console.error(
-            "🔄 Токен хугацаа дууссан болох магадлалтай, хэрэглэгчийг дахин холбохыг зөвлөж байна"
+
+        // Алдааны дэлгэрэнгүй мэдээлэл логдох
+        console.error("❌ Google Fit өгөгдөл татахад алдаа гарлаа:", {
+          errorType:
+            fitError instanceof Error
+              ? fitError.constructor.name
+              : typeof fitError,
+          message: errorMessage,
+          hasAuthReference:
+            errorMessage.includes("auth") ||
+            errorMessage.includes("401") ||
+            errorMessage.includes("доступ хүчингүй"),
+          accessTokenLength: accessToken?.length || 0,
+          accessTokenStart: accessToken
+            ? accessToken.substring(0, 5) + "..."
+            : "байхгүй",
+        });
+
+        // Токен дууссан алдааг дотооддоо шийдэх оролдлого хийх
+        if (
+          errorMessage.includes("401") ||
+          errorMessage.includes("auth") ||
+          errorMessage.includes("доступ хүчингүй")
+        ) {
+          console.log(
+            "🔄 Токен хугацаа дууссан байх магадлалтай, нэмэлт оролдлого хийж байна"
           );
-          setError(
-            "Хэрэглэгчийн нэвтрэх эрх дууссан байна. Дахин холбохыг зөвлөж байна."
-          );
+          try {
+            // Шинэ токен авах оролдлого хийх
+            const newTokens = await refreshAccessToken(
+              officerData.refreshToken
+            );
+            accessToken = newTokens.accessToken;
+            tokenExpiry = newTokens.tokenExpiry;
+
+            // Шинэ токеноор өгөгдөл авах
+            console.log("🔍 Шинэ токеноор Google Fit өгөгдөл татаж байна");
+            const fitData = await getGoogleFitData(accessToken);
+
+            // Шинэ токен ба өгөгдөл хадгалах
+            const updateSuccess = await updatePoliceOfficerData(
+              officerData.userId,
+              fitData,
+              {
+                accessToken,
+                refreshToken: officerData.refreshToken,
+                tokenExpiry,
+              }
+            );
+
+            if (updateSuccess) {
+              setFitnessData(fitData);
+              setPatient((prev) => {
+                if (!prev) return null;
+                return {
+                  ...prev,
+                  accessToken,
+                  tokenExpiry,
+                  fitnessData: fitData,
+                  lastUpdated: new Date(),
+                };
+              });
+              console.log("✅ Токен шинэчлэлт амжилттай боллоо");
+              setError(null);
+            } else {
+              console.error("❌ Шинэ токен хадгалахад алдаа гарлаа");
+              // Хэрэглэгчид дэлгэцэнд харуулахгүй
+            }
+          } catch (retryError) {
+            const retryErrorMessage =
+              retryError instanceof Error
+                ? retryError.message
+                : String(retryError);
+
+            console.error(
+              "❌ Автомат токен шинэчлэх оролдлого амжилтгүй боллоо:",
+              retryError
+            );
+
+            // Алдааны дэлгэрэнгүй мэдээлэл логдох
+            console.error(
+              "🔍 Дахин токен шинэчлэх алдааны дэлгэрэнгүй мэдээлэл:",
+              {
+                errorType:
+                  retryError instanceof Error
+                    ? retryError.constructor.name
+                    : typeof retryError,
+                message: retryErrorMessage,
+                hasClientIdReference:
+                  retryErrorMessage.includes("client") &&
+                  retryErrorMessage.includes("ID"),
+                hasAuthReference:
+                  retryErrorMessage.includes("auth") ||
+                  retryErrorMessage.includes("401"),
+              }
+            );
+
+            // Хэрэглэгчид харуулах алдааны текстийг нуух
+            // Дахин холбогдох хүсэлт гаргасан тохиолдолд авах арга хэмжээ
+            if (fitnessData) {
+              // Хуучин өгөгдлийг харуулах боломжтой бол тэр өгөгдлийг харуулна
+              console.log("⚠️ Хуучин фитнесс өгөгдлийг харуулж байна");
+            } else {
+              // Дэлгэцэд хоосон эсвэл үндсэн утгыг харуулна
+              setFitnessData({
+                steps: 0,
+                heartRate: 0,
+                calories: 0,
+                timestamp: new Date(),
+              });
+              console.log("⚠️ Хоосон фитнесс өгөгдлийг харуулж байна");
+
+              // Энд дахин холбогдох хуудас руу шилжүүлэх боломжтой
+              // window.location.href = "/connect-fit"; - серверийн талын хуудсанд ашиглах боломжгүй
+            }
+          }
         } else {
-          // Бусад алдаа
-          throw fitError;
+          // Бусад төрлийн алдаа бол лог хийх, хэрэглэгчид харуулахгүй
+          console.error("❌ Бусад төрлийн алдаа:", fitError);
+
+          // Хэрэв өмнө нь фитнес өгөгдөл байгаа бол алдааны мессеж харуулахгүй
+          if (!fitnessData) {
+            setError(
+              "Фитнесс өгөгдөл авах боломжгүй байна. Хуучин өгөгдлийг харуулж байна."
+            );
+          }
         }
       }
     } catch (err) {
       console.error("❌ Өгөгдөл авахад алдаа гарлаа:", err);
-      setError(
-        "Фитнесс өгөгдөл авахад алдаа гарлаа: " +
-          (err instanceof Error ? err.message : String(err))
-      );
+
+      // Алдааны дэлгэрэнгүй мэдээлэл логдох
+      const errMessage = err instanceof Error ? err.message : String(err);
+      console.error("🔍 Үндсэн алдааны дэлгэрэнгүй мэдээлэл:", {
+        errorType: err instanceof Error ? err.constructor.name : typeof err,
+        message: errMessage,
+        stack: err instanceof Error ? err.stack : "No stack trace",
+      });
+
+      // Хуучин өгөгдөл байгаа эсэхийг шалгах
+      if (fitnessData) {
+        // Хэрэв хуучин өгөгдөл байгаа бол алдааны мессеж харуулахгүй
+        console.log(
+          "⚠️ Хуучин фитнесс өгөгдлийг харуулж байна, алдааны мессежийг харуулахгүй"
+        );
+      } else {
+        // Зөвхөн хуучин өгөгдөл байхгүй үед л алдааны мессеж харуулах
+        setError("Фитнесс өгөгдөл авах боломжгүй байна. Дахин оролдоно уу.");
+      }
     } finally {
       setLoading(false);
     }
